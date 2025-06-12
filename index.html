@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>天使と悪魔チャット</title>
+  <link rel="stylesheet" href="./style.css" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+</head>
+<body>
+  <h1>なんでも相談チャット</h1>
+  <p>今の悩みや気持ちを書いてね</p>
+  <textarea id="userInput" placeholder="例：また今日もミスしちゃった、、"></textarea><br>
+  <button onclick="askAngel()">👼天使に相談</button>
+  <button onclick="askDevil()">👿悪魔に相談</button>
+  <div class="chat" id="chatOutput"></div>
+  <p>過去の相談を見たいときは検索してね</p>
+  <input type="date" id="searchDate">
+  <button onclick="searchByDate()">🔍 日付で検索</button>
+  <button onclick="showFavoritesOnly()">⭐ お気に入りだけ表示</button>
+
+  <script type="module">
+    import {
+      initializeApp
+    } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-app.js";
+    import {
+      getFirestore,
+      collection,
+      addDoc,
+      serverTimestamp,
+      query,
+      where,
+      orderBy,
+      getDocs,
+      getDoc,
+      deleteDoc,
+      doc,
+      updateDoc
+    } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "",
+      authDomain: "angel-devil-4987b.firebaseapp.com",
+      projectId: "angel-devil-4987b",
+      storageBucket: "angel-devil-4987b.appspot.com",
+      messagingSenderId: "870583141639",
+      appId: "1:870583141639:web:d9d57ac50cda8bb500f1a2"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    function formatDate(timestamp) {
+      const date = new Date(timestamp.seconds * 1000);
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const h = String(date.getHours()).padStart(2, '0');
+      const min = String(date.getMinutes()).padStart(2, '0');
+      return `${y}/${m}/${d} ${h}:${min}`;
+    }
+
+    async function fetchReply(role, prompt) {
+      const apiKey = "";
+      const response = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        }
+      );
+      const data = await response.json();
+      return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "……（返事がこないようです）";
+    }
+
+    async function askAngel() {
+      const userText = document.getElementById("userInput").value;
+      const prompt = `あなたは「天使」です。100字程度で優しく、思いやりがあり、悩んでいる人の心を包み込むような言葉をかけてください。\n\n相談：「${userText}」`;
+      const reply = await fetchReply("angel", prompt);
+      const docRef = await addDoc(collection(db, "chatHistory"), {
+        role: "angel",
+        input: userText,
+        response: reply,
+        time: serverTimestamp(),
+        favorite: false
+      });
+      const savedDoc = await getDoc(docRef);
+      displayReply("👼 天使", reply, "angel", savedDoc.data().time, userText, docRef.id, false);
+    }
+
+    async function askDevil() {
+      const userText = document.getElementById("userInput").value;
+      const prompt = `あなたは「悪魔」です。現実的で毒舌ですが、どこか的を射ていることをズバっと言います。100字程度で悩んでいる人にズバズバ物申してください。\n\n相談：「${userText}」`;
+      const reply = await fetchReply("devil", prompt);
+      const docRef = await addDoc(collection(db, "chatHistory"), {
+        role: "devil",
+        input: userText,
+        response: reply,
+        time: serverTimestamp(),
+        favorite: false
+      });
+      const savedDoc = await getDoc(docRef);
+      displayReply("😈 悪魔", reply, "devil", savedDoc.data().time, userText, docRef.id, false);
+    }
+
+    async function toggleFavorite(docId, currentState) {
+      const docRef = doc(db, "chatHistory", docId);
+      await updateDoc(docRef, { favorite: !currentState });
+      const updatedDoc = await getDoc(docRef);
+      const data = updatedDoc.data();
+      const chatDiv = document.getElementById(`chat-${docId}`);
+      if (chatDiv) chatDiv.remove();
+      displayReply(
+        data.role === "angel" ? "👼 天使" : "😈 悪魔",
+        data.response,
+        data.role,
+        data.time,
+        data.input,
+        docId,
+        data.favorite
+      );
+    }
+
+    async function deleteChat(docId) {
+      if (!confirm("このメッセージを削除しますか？")) return;
+      await deleteDoc(doc(db, "chatHistory", docId));
+      const div = document.getElementById(`chat-${docId}`);
+      if (div) div.remove();
+    }
+
+    function displayReply(name, text, type, time, inputText = "", docId = "", isFavorite = false) {
+      const div = document.createElement("div");
+      div.className = `response ${type} card mb-3 p-3`;
+      div.id = `chat-${docId}`;
+      const dateText = time ? formatDate(time) : "";
+      const starIcon = isFavorite ? "⭐" : "☆";
+      div.innerHTML = `
+        <h5>${name}（${dateText}）</h5>
+        <p><strong>あなたの相談：</strong>${inputText}</p>
+        <p>${text}</p>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-outline-warning btn-sm favorite-btn">${starIcon} お気に入り</button>
+          <button class="btn btn-outline-danger btn-sm delete-btn">🗑 削除</button>
+        </div>
+      `;
+      div.querySelector(".favorite-btn").addEventListener("click", () => toggleFavorite(docId, isFavorite));
+      div.querySelector(".delete-btn").addEventListener("click", () => deleteChat(docId));
+      document.getElementById("chatOutput").prepend(div);
+    }
+
+    window.showFavoritesOnly = async function () {
+      const q = query(collection(db, "chatHistory"), where("favorite", "==", true), orderBy("time", "desc"));
+      const querySnapshot = await getDocs(q);
+      document.getElementById("chatOutput").innerHTML = "";
+      if (querySnapshot.empty) {
+        document.getElementById("chatOutput").innerHTML = "<p>お気に入りはまだありません。</p>";
+        return;
+      }
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        displayReply(
+          data.role === "angel" ? "👼 天使" : "😈 悪魔",
+          data.response,
+          data.role,
+          data.time,
+          data.input,
+          docSnap.id,
+          data.favorite
+        );
+      });
+    };
+
+    window.searchByDate = async function () {
+      const selectedDate = document.getElementById("searchDate").value;
+      if (!selectedDate) return;
+      const start = new Date(selectedDate + "T00:00:00");
+      const end = new Date(selectedDate + "T23:59:59");
+      const q = query(collection(db, "chatHistory"), where("time", ">=", start), where("time", "<=", end), orderBy("time", "desc"));
+      const querySnapshot = await getDocs(q);
+      document.getElementById("chatOutput").innerHTML = "";
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        displayReply(
+          data.role === "angel" ? "👼 天使" : "😈 悪魔",
+          data.response,
+          data.role,
+          data.time,
+          data.input,
+          docSnap.id,
+          data.favorite
+        );
+      });
+    };
+
+    window.askAngel = askAngel;
+    window.askDevil = askDevil;
+  </script>
+</body>
+</html>
